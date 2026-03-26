@@ -1,0 +1,6 @@
+route,total_searches,avg_spike,surge_windows,avg_flash_fare,avg_uplift,peak_spike
+SFO-SYD,4763,1.39,12,581.76,11.88,24.0
+LAX-TYO,4650,1.35,13,582.25,11.97,16.57
+CHI-PAR,4314,1.39,12,583.49,12.21,14.0
+NYC-LON,4309,1.28,12,584.01,12.31,11.43
+MIA-MAD,4147,1.33,13,583.74,12.26,13.78

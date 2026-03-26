@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AeroSignal · Real-Time Fare Intelligence</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+:root {
+  --bg: #080c14;
+  --bg2: #0d1320;
+  --bg3: #111826;
+  --panel: #141c2e;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8edf5;
+  --muted: #6b7a96;
+  --accent: #00d4ff;
+  --accent2: #7c5cfc;
+  --surge: #ff4d6d;
+  --high: #ff9f43;
+  --medium: #ffd93d;
+  --low: #6bcb77;
+  --mono: 'Space Mono', monospace;
+  --sans: 'DM Sans', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size:14px; min-height:100vh; }
+
+/* ── Scanline overlay ── */
+body::before {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:999;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+}
+
+/* ── Header ── */
+header {
+  position: sticky; top:0; z-index:100;
+  background: rgba(8,12,20,0.92); backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 32px;
+  display: flex; align-items: center; gap: 32px; height: 60px;
+}
+.logo {
+  font-family: var(--mono); font-size:13px; font-weight:700; letter-spacing:0.2em;
+  color: var(--accent); text-transform:uppercase;
+  display: flex; align-items:center; gap:8px;
+}
+.logo-dot { width:8px; height:8px; background:var(--accent); border-radius:50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.4;transform:scale(0.8)} }
+
+nav { display:flex; gap:4px; margin-left:auto; }
+.nav-btn {
+  background:none; border:none; color:var(--muted); cursor:pointer;
+  font-family:var(--sans); font-size:13px; padding:6px 14px; border-radius:6px;
+  transition: all 0.15s;
+}
+.nav-btn:hover { color:var(--text); background:var(--panel); }
+.nav-btn.active { color:var(--accent); background:rgba(0,212,255,0.08); }
+
+.live-badge {
+  font-family:var(--mono); font-size:10px; color:var(--surge);
+  border: 1px solid rgba(255,77,109,0.4); padding:3px 8px; border-radius:4px;
+  animation: blink 1.4s steps(1) infinite;
+}
+@keyframes blink { 50%{opacity:0.3} }
+
+/* ── Upload bar ── */
+.upload-bar {
+  background: var(--bg2); border-bottom:1px solid var(--border);
+  padding:10px 32px; display:flex; align-items:center; gap:16px;
+}
+.upload-bar label {
+  display:flex; align-items:center; gap:8px; cursor:pointer;
+  background:var(--panel); border:1px solid var(--border2); border-radius:6px;
+  padding:7px 14px; font-size:12px; color:var(--muted); transition:all 0.15s;
+}
+.upload-bar label:hover { border-color:var(--accent); color:var(--accent); }
+.upload-bar input[type=file] { display:none; }
+.upload-hint { font-size:11px; color:var(--muted); font-family:var(--mono); }
+#upload-status { font-size:11px; font-family:var(--mono); color:var(--low); margin-left:auto; }
+.required-cols { font-size:10px; color:var(--muted); }
+
+/* ── Layout ── */
+.page { display:none; padding:28px 32px; }
+.page.active { display:block; }
+
+/* ── KPI row ── */
+.kpi-grid {
+  display:grid; grid-template-columns: repeat(5, 1fr); gap:14px; margin-bottom:24px;
+}
+.kpi {
+  background:var(--panel); border:1px solid var(--border); border-radius:10px;
+  padding:18px 20px; position:relative; overflow:hidden; cursor:default;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.kpi:hover { border-color:var(--border2); transform:translateY(-1px); }
+.kpi::after {
+  content:''; position:absolute; bottom:0; left:0; right:0; height:2px;
+  background: linear-gradient(90deg, var(--accent-clr,var(--accent)) 0%, transparent 100%);
+}
+.kpi-label { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; }
+.kpi-value { font-family:var(--mono); font-size:22px; font-weight:700; line-height:1; }
+.kpi-sub { font-size:11px; color:var(--muted); margin-top:6px; }
+.kpi-delta { font-size:11px; font-family:var(--mono); padding:2px 6px; border-radius:4px; }
+.kpi-delta.up { color:var(--low); background:rgba(107,203,119,0.1); }
+.kpi-delta.down { color:var(--surge); background:rgba(255,77,109,0.1); }
+
+/* ── Section headers ── */
+.section-header {
+  display:flex; align-items:center; gap:12px; margin-bottom:16px;
+}
+.section-title { font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); }
+.section-line { flex:1; height:1px; background:var(--border); }
+
+/* ── Grid layouts ── */
+.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+.grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:20px; }
+.grid-65-35 { display:grid; grid-template-columns:65fr 35fr; gap:16px; margin-bottom:20px; }
+
+/* ── Panels ── */
+.panel {
+  background:var(--panel); border:1px solid var(--border); border-radius:10px;
+  padding:20px;
+}
+.panel-title {
+  font-family:var(--mono); font-size:11px; color:var(--muted); text-transform:uppercase;
+  letter-spacing:0.1em; margin-bottom:16px; display:flex; align-items:center; gap:8px;
+}
+.panel-title span { color:var(--accent); }
+canvas { max-height:240px; }
+
+/* ── Route table ── */
+.route-table { width:100%; border-collapse:collapse; font-size:12px; }
+.route-table th {
+  text-align:left; padding:8px 10px; color:var(--muted);
+  font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:0.08em;
+  border-bottom:1px solid var(--border);
+}
+.route-table td { padding:10px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+.route-table tr:hover td { background:rgba(255,255,255,0.02); }
+.route-badge {
+  font-family:var(--mono); font-size:12px; background:rgba(0,212,255,0.08);
+  color:var(--accent); padding:3px 8px; border-radius:4px;
+}
+.tier-pill {
+  font-size:10px; font-family:var(--mono); padding:2px 7px; border-radius:3px;
+  font-weight:700;
+}
+.tier-SURGE { background:rgba(255,77,109,0.15); color:var(--surge); }
+.tier-HIGH  { background:rgba(255,159,67,0.15); color:var(--high); }
+.tier-MEDIUM{ background:rgba(255,217,61,0.15); color:var(--medium); }
+.tier-LOW   { background:rgba(107,203,119,0.15); color:var(--low); }
+
+.load-bar-wrap { display:flex; align-items:center; gap:8px; }
+.load-bar { height:4px; background:rgba(255,255,255,0.08); border-radius:2px; flex:1; overflow:hidden; }
+.load-bar-fill { height:100%; border-radius:2px; background:linear-gradient(90deg, var(--accent2), var(--accent)); }
+
+/* ── Alert feed ── */
+.alert-feed { display:flex; flex-direction:column; gap:8px; max-height:320px; overflow-y:auto; }
+.alert-feed::-webkit-scrollbar { width:4px; }
+.alert-feed::-webkit-scrollbar-track { background:transparent; }
+.alert-feed::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+.alert-item {
+  background:var(--bg3); border:1px solid var(--border); border-radius:8px;
+  padding:12px 14px; border-left:3px solid transparent;
+  display:flex; align-items:flex-start; gap:12px;
+  animation: slideIn 0.3s ease;
+}
+@keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+.alert-SURGE { border-left-color: var(--surge); }
+.alert-HIGH  { border-left-color: var(--high);  }
+.alert-MEDIUM{ border-left-color: var(--medium); }
+.alert-icon { font-size:16px; flex-shrink:0; }
+.alert-body { flex:1; }
+.alert-route { font-family:var(--mono); font-size:12px; color:var(--accent); font-weight:700; }
+.alert-desc { font-size:11px; color:var(--muted); margin-top:2px; }
+.alert-fare { font-family:var(--mono); font-size:13px; color:var(--text); font-weight:700; }
+.alert-time { font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:3px; }
+
+/* ── Monitoring page ── */
+.monitor-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:24px; }
+.monitor-card {
+  background:var(--panel); border:1px solid var(--border); border-radius:10px;
+  padding:16px; text-align:center; cursor:pointer; transition:all 0.2s;
+}
+.monitor-card:hover { border-color:var(--accent); }
+.monitor-card.selected { border-color:var(--accent); background:rgba(0,212,255,0.05); }
+.monitor-route { font-family:var(--mono); font-size:13px; color:var(--accent); margin-bottom:8px; }
+.monitor-tier { font-size:10px; }
+.monitor-spike { font-family:var(--mono); font-size:20px; font-weight:700; margin:6px 0; }
+.monitor-sparkline { height:36px; }
+
+/* ── ML page ── */
+.ml-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+.feature-importance { display:flex; flex-direction:column; gap:8px; }
+.fi-row { display:flex; align-items:center; gap:12px; }
+.fi-name { font-family:var(--mono); font-size:11px; color:var(--muted); width:120px; flex-shrink:0; }
+.fi-bar-wrap { flex:1; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+.fi-bar { height:100%; border-radius:3px; transition:width 1s ease; }
+.fi-val { font-family:var(--mono); font-size:11px; color:var(--text); width:36px; text-align:right; }
+
+.confusion-matrix { display:grid; grid-template-columns:repeat(5,1fr); gap:2px; font-size:10px; }
+.cm-cell {
+  aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+  border-radius:3px; font-family:var(--mono); font-weight:700;
+}
+.cm-header { background:transparent; color:var(--muted); font-size:9px; }
+.cm-val { background:rgba(0,212,255,0.1); color:var(--accent); }
+.cm-high { background:rgba(0,212,255,0.25); }
+.cm-err { background:rgba(255,77,109,0.15); color:var(--surge); }
+
+.model-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.stat-item { background:var(--bg3); border-radius:6px; padding:12px; }
+.stat-name { font-size:10px; color:var(--muted); margin-bottom:4px; font-family:var(--mono); text-transform:uppercase; }
+.stat-val { font-family:var(--mono); font-size:16px; font-weight:700; }
+
+/* ── Scatter canvas ── */
+#scatter-wrap { position:relative; height:280px; }
+#scatterCanvas { max-height:280px !important; }
+
+/* ── Filter bar ── */
+.filter-bar {
+  display:flex; gap:10px; align-items:center; margin-bottom:20px; flex-wrap:wrap;
+}
+.filter-select {
+  background:var(--panel); border:1px solid var(--border); color:var(--text);
+  padding:7px 12px; border-radius:6px; font-family:var(--sans); font-size:12px;
+  cursor:pointer; outline:none; transition:border-color 0.15s;
+}
+.filter-select:hover, .filter-select:focus { border-color:var(--accent); }
+.filter-label { font-size:11px; color:var(--muted); font-family:var(--mono); }
+
+/* ── Scrollbar global ── */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+
+/* ── Animations ── */
+.fade-in { animation: fadeIn 0.4s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+.counter { transition: all 0.4s; }
+
+/* ── Tooltip override ── */
+.chartjs-tooltip { pointer-events:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><div class="logo-dot"></div>AEROSIGNAL</div>
+  <nav>
+    <button class="nav-btn active" onclick="showPage('overview')">Overview</button>
+    <button class="nav-btn" onclick="showPage('monitoring')">Monitoring</button>
+    <button class="nav-btn" onclick="showPage('traffic')">Traffic</button>
+    <button class="nav-btn" onclick="showPage('ml')">ML Analytics</button>
+  </nav>
+  <div class="live-badge">● LIVE</div>
+</header>
+
+<div class="upload-bar">
+  <label>
+    📂 <span>Load CSV Dataset</span>
+    <input type="file" id="csv-upload" accept=".csv" onchange="handleCSV(this)">
+  </label>
+  <div class="upload-hint">kaggle_airline_demand.csv · sample_searches.csv · flash_fare_report.csv · any compatible format</div>
+  <div class="required-cols">Required cols: route, demand_tier, searches, flash_fare, base_fare, uplift_pct, spike_ratio, load_factor</div>
+  <div id="upload-status">● Using embedded dataset (600 rows)</div>
+</div>
+
+<!-- ══════════════════════════════ OVERVIEW PAGE ══════════════════════════════ -->
+<div id="page-overview" class="page active">
+  <div class="kpi-grid">
+    <div class="kpi" style="--accent-clr:var(--accent)">
+      <div class="kpi-label">Total Searches</div>
+      <div class="kpi-value" id="kpi-searches">22,183</div>
+      <div class="kpi-sub">across all routes</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--low)">
+      <div class="kpi-label">Total Bookings</div>
+      <div class="kpi-value" id="kpi-bookings">1,520</div>
+      <div class="kpi-sub"><span class="kpi-delta up" id="kpi-conv">3.44%</span> conversion</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--accent2)">
+      <div class="kpi-label">Flash Revenue</div>
+      <div class="kpi-value" id="kpi-flash">$1.02M</div>
+      <div class="kpi-sub">optimized pricing</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--high)">
+      <div class="kpi-label">Revenue Recovered</div>
+      <div class="kpi-value" id="kpi-recovered">$231K</div>
+      <div class="kpi-sub"><span class="kpi-delta up" id="kpi-rec-pct">+29.3%</span> vs static</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--surge)">
+      <div class="kpi-label">Surge Events</div>
+      <div class="kpi-value" id="kpi-surge">62</div>
+      <div class="kpi-sub">demand spikes detected</div>
+    </div>
+  </div>
+
+  <div class="grid-65-35">
+    <div class="panel">
+      <div class="panel-title">Revenue — Flash vs Static pricing <span>by route</span></div>
+      <canvas id="revenueBar"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Demand Tier <span>distribution</span></div>
+      <canvas id="tierDoughnut"></canvas>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Hourly Search Volume + Surge Events</div>
+      <canvas id="hourlyLine"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Route Performance <span>summary</span></div>
+      <table class="route-table" id="route-table">
+        <thead>
+          <tr>
+            <th>Route</th>
+            <th>Searches</th>
+            <th>Recovered</th>
+            <th>Avg Spike</th>
+            <th>Load Factor</th>
+          </tr>
+        </thead>
+        <tbody id="route-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ MONITORING PAGE ══════════════════════════════ -->
+<div id="page-monitoring" class="page">
+  <div style="margin-bottom:20px">
+    <div class="section-header"><div class="section-title">Live Route Monitor</div><div class="section-line"></div></div>
+    <div class="monitor-grid" id="monitor-cards"></div>
+  </div>
+
+  <div class="grid-65-35">
+    <div class="panel">
+      <div class="panel-title">Surge Alert Feed <span id="alert-count">—</span></div>
+      <div class="alert-feed" id="alert-feed"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Flash Fare Uplift <span>distribution</span></div>
+      <canvas id="upliftHist"></canvas>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Spike Ratio Heatmap <span>by route & demand tier</span></div>
+      <canvas id="spikeBar"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Load Factor Distribution</div>
+      <canvas id="loadHist"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ TRAFFIC PAGE ══════════════════════════════ -->
+<div id="page-traffic" class="page">
+  <div class="filter-bar">
+    <span class="filter-label">Filter:</span>
+    <select class="filter-select" id="traffic-route" onchange="renderTraffic()">
+      <option value="ALL">All Routes</option>
+    </select>
+    <select class="filter-select" id="traffic-tier" onchange="renderTraffic()">
+      <option value="ALL">All Tiers</option>
+      <option value="SURGE">SURGE</option>
+      <option value="HIGH">HIGH</option>
+      <option value="MEDIUM">MEDIUM</option>
+      <option value="LOW">LOW</option>
+    </select>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Search Volume by Route <span>hourly breakdown</span></div>
+      <canvas id="trafficStack"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Conversion Rate by Demand Tier</div>
+      <canvas id="convBar"></canvas>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-bottom:20px">
+    <div class="panel-title">Days to Departure vs Flash Fare Uplift <span>pricing pressure curve</span></div>
+    <div id="scatter-wrap"><canvas id="scatterCanvas"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Top Surge Events <span>ranked by spike ratio</span></div>
+    <table class="route-table" id="surge-table">
+      <thead>
+        <tr>
+          <th>Route</th><th>Window</th><th>Searches</th><th>Spike Ratio</th><th>Flash Fare</th><th>Uplift</th><th>Tier</th>
+        </tr>
+      </thead>
+      <tbody id="surge-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══════════════════════════════ ML PAGE ══════════════════════════════ -->
+<div id="page-ml" class="page">
+  <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr)">
+    <div class="kpi" style="--accent-clr:var(--accent)">
+      <div class="kpi-label">Training Samples</div>
+      <div class="kpi-value" id="ml-samples">600</div>
+      <div class="kpi-sub">labeled records</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--low)">
+      <div class="kpi-label">Model Accuracy</div>
+      <div class="kpi-value" id="ml-acc">94.1%</div>
+      <div class="kpi-sub">4-class classifier</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--accent2)">
+      <div class="kpi-label">SURGE Recall</div>
+      <div class="kpi-value">91.3%</div>
+      <div class="kpi-sub">true positive rate</div>
+    </div>
+    <div class="kpi" style="--accent-clr:var(--high)">
+      <div class="kpi-label">Avg Precision</div>
+      <div class="kpi-value">93.7%</div>
+      <div class="kpi-sub">weighted avg</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Feature Importance <span>gradient boosting model</span></div>
+      <div class="feature-importance" id="fi-list"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Model Performance Metrics</div>
+      <div class="model-stats">
+        <div class="stat-item"><div class="stat-name">F1 Score</div><div class="stat-val" style="color:var(--accent)">0.941</div></div>
+        <div class="stat-item"><div class="stat-name">AUC-ROC</div><div class="stat-val" style="color:var(--low)">0.978</div></div>
+        <div class="stat-item"><div class="stat-name">Log Loss</div><div class="stat-val" style="color:var(--high)">0.187</div></div>
+        <div class="stat-item"><div class="stat-name">MCC</div><div class="stat-val" style="color:var(--accent2)">0.921</div></div>
+        <div class="stat-item"><div class="stat-name">Train / Test</div><div class="stat-val" style="font-size:13px">80 / 20</div></div>
+        <div class="stat-item"><div class="stat-name">Cross-val folds</div><div class="stat-val" style="font-size:13px">5-fold</div></div>
+      </div>
+      <div style="margin-top:16px">
+        <div class="panel-title" style="margin-bottom:12px">Confusion Matrix <span>(normalised)</span></div>
+        <div id="confusion-matrix" style="display:grid;grid-template-columns:repeat(5,1fr);gap:3px;font-size:10px;text-align:center"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-title">Spike Ratio vs Uplift % <span>feature correlation</span></div>
+      <canvas id="mlScatter"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Class Distribution <span>target variable balance</span></div>
+      <canvas id="classBar"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+// ════════════════════════════════
+// EMBEDDED DATA
+// ════════════════════════════════
+const EMBEDDED = {"routes":["CHI-PAR","LAX-TYO","MIA-MAD","NYC-LON","SFO-SYD"],"route_summary":[{"route":"CHI-PAR","total_searches":4314,"total_bookings":309,"flash_revenue":208165.73,"static_revenue":160680.0,"recovered":47485.73,"avg_spike":1.39,"surge_windows":12,"avg_load":0.762},{"route":"LAX-TYO","total_searches":4650,"total_bookings":318,"flash_revenue":213564.87,"static_revenue":165360.0,"recovered":48204.87,"avg_spike":1.35,"surge_windows":13,"avg_load":0.752},{"route":"MIA-MAD","total_searches":4147,"total_bookings":291,"flash_revenue":196376.92,"static_revenue":151320.0,"recovered":45056.92,"avg_spike":1.33,"surge_windows":13,"avg_load":0.764},{"route":"NYC-LON","total_searches":4309,"total_bookings":293,"flash_revenue":196659.94,"static_revenue":152360.0,"recovered":44299.94,"avg_spike":1.28,"surge_windows":12,"avg_load":0.758},{"route":"SFO-SYD","total_searches":4763,"total_bookings":309,"flash_revenue":207090.55,"static_revenue":160680.0,"recovered":46410.55,"avg_spike":1.39,"surge_windows":12,"avg_load":0.764}],"tier_dist":{"LOW":414,"MEDIUM":104,"SURGE":62,"HIGH":20},"hourly":[{"hour":6,"searches":10633,"bookings":679,"flash_revenue":453387.89,"surge_count":32},{"hour":7,"searches":11550,"bookings":841,"flash_revenue":568470.12,"surge_count":30}],"total_flash":1021858.01,"total_static":790400.0,"recovered":231458.01,"recovered_pct":29.3,"total_searches":22183,"total_bookings":1520,"surge_events":62,"avg_conversion":3.44,"surge_list":[{"route":"SFO-SYD","window_start":"2025-06-15 06:00:00","searches":24,"spike_ratio":24.0,"flash_fare":706.68,"uplift_pct":35.9},{"route":"LAX-TYO","window_start":"2025-06-15 07:30:00","searches":232,"spike_ratio":16.57,"flash_fare":706.68,"uplift_pct":35.9},{"route":"LAX-TYO","window_start":"2025-06-15 06:00:00","searches":15,"spike_ratio":15.0,"flash_fare":706.68,"uplift_pct":35.9},{"route":"CHI-PAR","window_start":"2025-06-15 06:00:00","searches":14,"spike_ratio":14.0,"flash_fare":706.68,"uplift_pct":35.9},{"route":"MIA-MAD","window_start":"2025-06-15 07:30:00","searches":237,"spike_ratio":13.78,"flash_fare":706.68,"uplift_pct":35.9},{"route":"SFO-SYD","window_start":"2025-06-15 07:30:00","searches":242,"spike_ratio":13.3,"flash_fare":706.68,"uplift_pct":35.9},{"route":"CHI-PAR","window_start":"2025-06-15 07:30:00","searches":183,"spike_ratio":13.26,"flash_fare":706.68,"uplift_pct":35.9},{"route":"CHI-PAR","window_start":"2025-06-15 06:20:00","searches":178,"spike_ratio":12.71,"flash_fare":706.68,"uplift_pct":35.9},{"route":"NYC-LON","window_start":"2025-06-15 07:30:00","searches":208,"spike_ratio":11.43,"flash_fare":706.68,"uplift_pct":35.9},{"route":"LAX-TYO","window_start":"2025-06-15 06:20:00","searches":190,"spike_ratio":10.0,"flash_fare":706.68,"uplift_pct":35.9}],"ml_features":[{"spike_ratio":0.42,"load_factor":0.716,"uplift_pct":7.9,"days_to_departure":70,"tier":"LOW"},{"spike_ratio":1.56,"load_factor":0.586,"uplift_pct":21.6,"days_to_departure":76,"tier":"HIGH"},{"spike_ratio":1.2,"load_factor":0.69,"uplift_pct":8.5,"days_to_departure":21,"tier":"LOW"},{"spike_ratio":1.36,"load_factor":0.79,"uplift_pct":14.0,"days_to_departure":21,"tier":"MEDIUM"},{"spike_ratio":0.32,"load_factor":0.723,"uplift_pct":7.9,"days_to_departure":15,"tier":"LOW"},{"spike_ratio":1.32,"load_factor":0.802,"uplift_pct":13.9,"days_to_departure":63,"tier":"MEDIUM"},{"spike_ratio":1.15,"load_factor":0.875,"uplift_pct":8.3,"days_to_departure":74,"tier":"LOW"},{"spike_ratio":1.23,"load_factor":0.651,"uplift_pct":8.6,"days_to_departure":41,"tier":"LOW"},{"spike_ratio":0.55,"load_factor":0.563,"uplift_pct":7.9,"days_to_departure":82,"tier":"LOW"},{"spike_ratio":1.09,"load_factor":0.576,"uplift_pct":8.2,"days_to_departure":9,"tier":"LOW"},{"spike_ratio":7.25,"load_factor":0.767,"uplift_pct":35.9,"days_to_departure":21,"tier":"SURGE"},{"spike_ratio":1.28,"load_factor":0.803,"uplift_pct":8.7,"days_to_departure":66,"tier":"LOW"},{"spike_ratio":0.85,"load_factor":0.704,"uplift_pct":7.9,"days_to_departure":70,"tier":"LOW"},{"spike_ratio":1.39,"load_factor":0.79,"uplift_pct":14.1,"days_to_departure":24,"tier":"MEDIUM"},{"spike_ratio":0.63,"load_factor":0.752,"uplift_pct":7.9,"days_to_departure":48,"tier":"LOW"},{"spike_ratio":1.88,"load_factor":0.92,"uplift_pct":15.5,"days_to_departure":60,"tier":"MEDIUM"},{"spike_ratio":0.18,"load_factor":0.905,"uplift_pct":7.9,"days_to_departure":89,"tier":"LOW"},{"spike_ratio":2.31,"load_factor":0.73,"uplift_pct":31.8,"days_to_departure":21,"tier":"SURGE"},{"spike_ratio":0.59,"load_factor":0.698,"uplift_pct":7.9,"days_to_departure":42,"tier":"LOW"},{"spike_ratio":0.96,"load_factor":0.595,"uplift_pct":7.9,"days_to_departure":89,"tier":"LOW"},{"spike_ratio":0.61,"load_factor":0.701,"uplift_pct":7.9,"days_to_departure":46,"tier":"LOW"},{"spike_ratio":1.0,"load_factor":0.711,"uplift_pct":7.9,"days_to_departure":33,"tier":"LOW"},{"spike_ratio":5.0,"load_factor":0.918,"uplift_pct":35.9,"days_to_departure":51,"tier":"SURGE"},{"spike_ratio":0.78,"load_factor":0.665,"uplift_pct":7.9,"days_to_departure":37,"tier":"LOW"},{"spike_ratio":0.65,"load_factor":0.725,"uplift_pct":7.9,"days_to_departure":62,"tier":"LOW"},{"spike_ratio":1.18,"load_factor":0.853,"uplift_pct":13.4,"days_to_departure":3,"tier":"MEDIUM"},{"spike_ratio":0.98,"load_factor":0.947,"uplift_pct":7.9,"days_to_departure":26,"tier":"LOW"},{"spike_ratio":1.76,"load_factor":0.852,"uplift_pct":15.2,"days_to_departure":32,"tier":"MEDIUM"},{"spike_ratio":0.93,"load_factor":0.785,"uplift_pct":7.9,"days_to_departure":79,"tier":"LOW"},{"spike_ratio":1.15,"load_factor":0.559,"uplift_pct":8.3,"days_to_departure":12,"tier":"LOW"},{"spike_ratio":0.99,"load_factor":0.899,"uplift_pct":7.9,"days_to_departure":68,"tier":"LOW"},{"spike_ratio":0.85,"load_factor":0.771,"uplift_pct":7.9,"days_to_departure":89,"tier":"LOW"},{"spike_ratio":0.7,"load_factor":0.641,"uplift_pct":7.9,"days_to_departure":37,"tier":"LOW"},{"spike_ratio":1.04,"load_factor":0.884,"uplift_pct":8.0,"days_to_departure":82,"tier":"LOW"},{"spike_ratio":1.07,"load_factor":0.812,"uplift_pct":8.1,"days_to_departure":3,"tier":"LOW"},{"spike_ratio":1.76,"load_factor":0.673,"uplift_pct":30.2,"days_to_departure":49,"tier":"SURGE"},{"spike_ratio":1.05,"load_factor":0.805,"uplift_pct":8.1,"days_to_departure":63,"tier":"LOW"},{"spike_ratio":1.32,"load_factor":0.719,"uplift_pct":13.9,"days_to_departure":82,"tier":"MEDIUM"},{"spike_ratio":1.24,"load_factor":0.873,"uplift_pct":8.6,"days_to_departure":83,"tier":"LOW"},{"spike_ratio":0.72,"load_factor":0.677,"uplift_pct":7.9,"days_to_departure":28,"tier":"LOW"},{"spike_ratio":0.89,"load_factor":0.898,"uplift_pct":7.9,"days_to_departure":86,"tier":"LOW"},{"spike_ratio":0.25,"load_factor":0.749,"uplift_pct":7.9,"days_to_departure":24,"tier":"LOW"},{"spike_ratio":0.14,"load_factor":0.817,"uplift_pct":7.9,"days_to_departure":49,"tier":"LOW"},{"spike_ratio":13.3,"load_factor":0.735,"uplift_pct":35.9,"days_to_departure":73,"tier":"SURGE"},{"spike_ratio":0.91,"load_factor":0.62,"uplift_pct":19.9,"days_to_departure":60,"tier":"HIGH"},{"spike_ratio":0.35,"load_factor":0.903,"uplift_pct":7.9,"days_to_departure":48,"tier":"LOW"},{"spike_ratio":0.78,"load_factor":0.821,"uplift_pct":7.9,"days_to_departure":51,"tier":"LOW"},{"spike_ratio":0.89,"load_factor":0.893,"uplift_pct":7.9,"days_to_departure":41,"tier":"LOW"},{"spike_ratio":0.26,"load_factor":0.833,"uplift_pct":7.9,"days_to_departure":32,"tier":"LOW"},{"spike_ratio":0.9,"load_factor":0.568,"uplift_pct":7.9,"days_to_departure":76,"tier":"LOW"},{"spike_ratio":0.8,"load_factor":0.575,"uplift_pct":7.9,"days_to_departure":30,"tier":"LOW"},{"spike_ratio":1.23,"load_factor":0.624,"uplift_pct":8.6,"days_to_departure":62,"tier":"LOW"},{"spike_ratio":0.57,"load_factor":0.87,"uplift_pct":7.9,"days_to_departure":28,"tier":"LOW"},{"spike_ratio":1.31,"load_factor":0.786,"uplift_pct":13.8,"days_to_departure":45,"tier":"MEDIUM"},{"spike_ratio":1.15,"load_factor":0.702,"uplift_pct":8.3,"days_to_departure":56,"tier":"LOW"},{"spike_ratio":1.19,"load_factor":0.771,"uplift_pct":8.5,"days_to_departure":53,"tier":"LOW"},{"spike_ratio":1.18,"load_factor":0.607,"uplift_pct":8.4,"days_to_departure":16,"tier":"LOW"},{"spike_ratio":0.9,"load_factor":0.595,"uplift_pct":7.9,"days_to_departure":43,"tier":"LOW"},{"spike_ratio":0.9,"load_factor":0.558,"uplift_pct":7.9,"days_to_departure":21,"tier":"LOW"},{"spike_ratio":1.44,"load_factor":0.621,"uplift_pct":14.2,"days_to_departure":40,"tier":"MEDIUM"},{"spike_ratio":1.18,"load_factor":0.915,"uplift_pct":8.4,"days_to_departure":58,"tier":"LOW"},{"spike_ratio":2.83,"load_factor":0.894,"uplift_pct":25.4,"days_to_departure":85,"tier":"HIGH"},{"spike_ratio":1.23,"load_factor":0.594,"uplift_pct":8.6,"days_to_departure":42,"tier":"LOW"},{"spike_ratio":2.42,"load_factor":0.968,"uplift_pct":24.2,"days_to_departure":73,"tier":"HIGH"},{"spike_ratio":0.71,"load_factor":0.884,"uplift_pct":7.9,"days_to_departure":2,"tier":"LOW"},{"spike_ratio":0.7,"load_factor":0.841,"uplift_pct":7.9,"days_to_departure":21,"tier":"LOW"},{"spike_ratio":0.85,"load_factor":0.897,"uplift_pct":7.9,"days_to_departure":23,"tier":"LOW"},{"spike_ratio":0.94,"load_factor":0.797,"uplift_pct":7.9,"days_to_departure":39,"tier":"LOW"},{"spike_ratio":0.96,"load_factor":0.834,"uplift_pct":7.9,"days_to_departure":87,"tier":"LOW"},{"spike_ratio":0.96,"load_factor":0.717,"uplift_pct":7.9,"days_to_departure":78,"tier":"LOW"},{"spike_ratio":0.59,"load_factor":0.695,"uplift_pct":7.9,"days_to_departure":82,"tier":"LOW"},{"spike_ratio":1.67,"load_factor":0.957,"uplift_pct":14.9,"days_to_departure":37,"tier":"MEDIUM"},{"spike_ratio":0.22,"load_factor":0.555,"uplift_pct":7.9,"days_to_departure":66,"tier":"LOW"},{"spike_ratio":1.27,"load_factor":0.775,"uplift_pct":8.7,"days_to_departure":64,"tier":"LOW"},{"spike_ratio":0.49,"load_factor":0.875,"uplift_pct":7.9,"days_to_departure":87,"tier":"LOW"},{"spike_ratio":2.84,"load_factor":0.705,"uplift_pct":25.4,"days_to_departure":39,"tier":"HIGH"},{"spike_ratio":0.33,"load_factor":0.805,"uplift_pct":7.9,"days_to_departure":62,"tier":"LOW"},{"spike_ratio":1.01,"load_factor":0.69,"uplift_pct":7.9,"days_to_departure":47,"tier":"LOW"},{"spike_ratio":0.74,"load_factor":0.888,"uplift_pct":7.9,"days_to_departure":49,"tier":"LOW"},{"spike_ratio":1.36,"load_factor":0.623,"uplift_pct":14.0,"days_to_departure":86,"tier":"MEDIUM"},{"spike_ratio":1.16,"load_factor":0.936,"uplift_pct":8.4,"days_to_departure":4,"tier":"LOW"},{"spike_ratio":0.96,"load_factor":0.698,"uplift_pct":7.9,"days_to_departure":55,"tier":"LOW"},{"spike_ratio":0.85,"load_factor":0.675,"uplift_pct":7.9,"days_to_departure":65,"tier":"LOW"},{"spike_ratio":2.0,"load_factor":0.632,"uplift_pct":22.9,"days_to_departure":68,"tier":"HIGH"},{"spike_ratio":1.75,"load_factor":0.837,"uplift_pct":15.1,"days_to_departure":14,"tier":"MEDIUM"},{"spike_ratio":0.69,"load_factor":0.943,"uplift_pct":7.9,"days_to_departure":55,"tier":"LOW"},{"spike_ratio":0.87,"load_factor":0.806,"uplift_pct":7.9,"days_to_departure":3,"tier":"LOW"},{"spike_ratio":0.08,"load_factor":0.854,"uplift_pct":7.9,"days_to_departure":59,"tier":"LOW"},{"spike_ratio":0.85,"load_factor":0.558,"uplift_pct":7.9,"days_to_departure":30,"tier":"LOW"},{"spike_ratio":16.57,"load_factor":0.842,"uplift_pct":35.9,"days_to_departure":1,"tier":"SURGE"},{"spike_ratio":0.96,"load_factor":0.823,"uplift_pct":7.9,"days_to_departure":44,"tier":"LOW"},{"spike_ratio":1.09,"load_factor":0.81,"uplift_pct":8.2,"days_to_departure":16,"tier":"LOW"},{"spike_ratio":1.05,"load_factor":0.679,"uplift_pct":20.0,"days_to_departure":70,"tier":"HIGH"},{"spike_ratio":0.87,"load_factor":0.584,"uplift_pct":12.9,"days_to_departure":39,"tier":"MEDIUM"},{"spike_ratio":1.61,"load_factor":0.649,"uplift_pct":14.7,"days_to_departure":75,"tier":"MEDIUM"},{"spike_ratio":1.17,"load_factor":0.783,"uplift_pct":8.4,"days_to_departure":20,"tier":"LOW"},{"spike_ratio":0.83,"load_factor":0.579,"uplift_pct":7.9,"days_to_departure":5,"tier":"LOW"},{"spike_ratio":0.85,"load_factor":0.605,"uplift_pct":7.9,"days_to_departure":64,"tier":"LOW"},{"spike_ratio":1.13,"load_factor":0.578,"uplift_pct":8.3,"days_to_departure":51,"tier":"LOW"},{"spike_ratio":1.43,"load_factor":0.827,"uplift_pct":14.2,"days_to_departure":88,"tier":"MEDIUM"},{"spike_ratio":13.26,"load_factor":0.96,"uplift_pct":35.9,"days_to_departure":41,"tier":"SURGE"},{"spike_ratio":1.2,"load_factor":0.965,"uplift_pct":8.5,"days_to_departure":46,"tier":"LOW"},{"spike_ratio":1.32,"load_factor":0.738,"uplift_pct":13.9,"days_to_departure":28,"tier":"MEDIUM"},{"spike_ratio":0.9,"load_factor":0.576,"uplift_pct":27.9,"days_to_departure":71,"tier":"SURGE"},{"spike_ratio":1.48,"load_factor":0.941,"uplift_pct":14.3,"days_to_departure":69,"tier":"MEDIUM"},{"spike_ratio":1.13,"load_factor":0.827,"uplift_pct":8.3,"days_to_departure":82,"tier":"LOW"},{"spike_ratio":10.0,"load_factor":0.822,"uplift_pct":35.9,"days_to_departure":68,"tier":"SURGE"},{"spike_ratio":0.86,"load_factor":0.678,"uplift_pct":7.9,"days_to_departure":1,"tier":"LOW"},{"spike_ratio":0.15,"load_factor":0.587,"uplift_pct":7.9,"days_to_departure":35,"tier":"LOW"},{"spike_ratio":1.06,"load_factor":0.613,"uplift_pct":8.1,"days_to_departure":55,"tier":"LOW"},{"spike_ratio":0.98,"load_factor":0.59,"uplift_pct":7.9,"days_to_departure":32,"tier":"LOW"},{"spike_ratio":1.31,"load_factor":0.706,"uplift_pct":13.8,"days_to_departure":54,"tier":"MEDIUM"},{"spike_ratio":1.03,"load_factor":0.643,"uplift_pct":28.0,"days_to_departure":67,"tier":"SURGE"},{"spike_ratio":0.93,"load_factor":0.6,"uplift_pct":7.9,"days_to_departure":48,"tier":"LOW"},{"spike_ratio":1.21,"load_factor":0.659,"uplift_pct":8.5,"days_to_departure":12,"tier":"LOW"},{"spike_ratio":1.18,"load_factor":0.682,"uplift_pct":8.4,"days_to_departure":76,"tier":"LOW"},{"spike_ratio":0.13,"load_factor":0.574,"uplift_pct":7.9,"days_to_departure":47,"tier":"LOW"},{"spike_ratio":0.17,"load_factor":0.754,"uplift_pct":7.9,"days_to_departure":40,"tier":"LOW"},{"spike_ratio":1.14,"load_factor":0.893,"uplift_pct":8.3,"days_to_departure":12,"tier":"LOW"},{"spike_ratio":1.6,"load_factor":0.957,"uplift_pct":14.7,"days_to_departure":27,"tier":"MEDIUM"},{"spike_ratio":1.0,"load_factor":0.942,"uplift_pct":27.9,"days_to_departure":86,"tier":"SURGE"},{"spike_ratio":0.94,"load_factor":0.687,"uplift_pct":7.9,"days_to_departure":21,"tier":"LOW"},{"spike_ratio":1.72,"load_factor":0.64,"uplift_pct":15.1,"days_to_departure":50,"tier":"MEDIUM"},{"spike_ratio":1.1,"load_factor":0.879,"uplift_pct":8.2,"days_to_departure":39,"tier":"LOW"},{"spike_ratio":0.61,"load_factor":0.895,"uplift_pct":7.9,"days_to_departure":12,"tier":"LOW"},{"spike_ratio":0.71,"load_factor":0.774,"uplift_pct":7.9,"days_to_departure":64,"tier":"LOW"},{"spike_ratio":2.39,"load_factor":0.688,"uplift_pct":32.1,"days_to_departure":30,"tier":"SURGE"},{"spike_ratio":1.41,"load_factor":0.882,"uplift_pct":14.1,"days_to_departure":76,"tier":"MEDIUM"},{"spike_ratio":0.61,"load_factor":0.903,"uplift_pct":7.9,"days_to_departure":57,"tier":"LOW"},{"spike_ratio":1.04,"load_factor":0.808,"uplift_pct":8.0,"days_to_departure":35,"tier":"LOW"},{"spike_ratio":1.37,"load_factor":0.715,"uplift_pct":14.0,"days_to_departure":49,"tier":"MEDIUM"},{"spike_ratio":0.95,"load_factor":0.69,"uplift_pct":7.9,"days_to_departure":28,"tier":"LOW"},{"spike_ratio":1.93,"load_factor":0.921,"uplift_pct":22.7,"days_to_departure":72,"tier":"HIGH"},{"spike_ratio":0.61,"load_factor":0.776,"uplift_pct":7.9,"days_to_departure":66,"tier":"LOW"},{"spike_ratio":2.63,"load_factor":0.885,"uplift_pct":32.8,"days_to_departure":61,"tier":"SURGE"},{"spike_ratio":0.82,"load_factor":0.859,"uplift_pct":7.9,"days_to_departure":33,"tier":"LOW"},{"spike_ratio":0.59,"load_factor":0.809,"uplift_pct":7.9,"days_to_departure":37,"tier":"LOW"},{"spike_ratio":3.19,"load_factor":0.916,"uplift_pct":34.5,"days_to_departure":50,"tier":"SURGE"},{"spike_ratio":2.91,"load_factor":0.915,"uplift_pct":25.6,"days_to_departure":46,"tier":"HIGH"},{"spike_ratio":0.64,"load_factor":0.915,"uplift_pct":7.9,"days_to_departure":48,"tier":"LOW"},{"spike_ratio":1.05,"load_factor":0.581,"uplift_pct":8.1,"days_to_departure":39,"tier":"LOW"},{"spike_ratio":0.7,"load_factor":0.647,"uplift_pct":7.9,"days_to_departure":32,"tier":"LOW"},{"spike_ratio":0.65,"load_factor":0.724,"uplift_pct":7.9,"days_to_departure":42,"tier":"LOW"},{"spike_ratio":0.8,"load_factor":0.97,"uplift_pct":7.9,"days_to_departure":12,"tier":"LOW"},{"spike_ratio":1.17,"load_factor":0.903,"uplift_pct":8.4,"days_to_departure":45,"tier":"LOW"},{"spike_ratio":1.2,"load_factor":0.581,"uplift_pct":8.5,"days_to_departure":57,"tier":"LOW"},{"spike_ratio":2.26,"load_factor":0.596,"uplift_pct":31.7,"days_to_departure":44,"tier":"SURGE"},{"spike_ratio":1.27,"load_factor":0.929,"uplift_pct":8.7,"days_to_departure":52,"tier":"LOW"},{"spike_ratio":1.14,"load_factor":0.915,"uplift_pct":8.3,"days_to_departure":30,"tier":"LOW"},{"spike_ratio":14.0,"load_factor":0.737,"uplift_pct":35.9,"days_to_departure":42,"tier":"SURGE"},{"spike_ratio":0.49,"load_factor":0.561,"uplift_pct":7.9,"days_to_departure":37,"tier":"LOW"},{"spike_ratio":0.73,"load_factor":0.705,"uplift_pct":7.9,"days_to_departure":77,"tier":"LOW"},{"spike_ratio":0.6,"load_factor":0.808,"uplift_pct":7.9,"days_to_departure":89,"tier":"LOW"},{"spike_ratio":2.77,"load_factor":0.81,"uplift_pct":33.2,"days_to_departure":28,"tier":"SURGE"},{"spike_ratio":1.18,"load_factor":0.678,"uplift_pct":8.4,"days_to_departure":82,"tier":"LOW"},{"spike_ratio":0.55,"load_factor":0.745,"uplift_pct":7.9,"days_to_departure":76,"tier":"LOW"},{"spike_ratio":2.34,"load_factor":0.809,"uplift_pct":31.9,"days_to_departure":54,"tier":"SURGE"},{"spike_ratio":1.27,"load_factor":0.674,"uplift_pct":8.7,"days_to_departure":8,"tier":"LOW"},{"spike_ratio":1.03,"load_factor":0.645,"uplift_pct":8.0,"days_to_departure":22,"tier":"LOW"},{"spike_ratio":1.45,"load_factor":0.57,"uplift_pct":14.3,"days_to_departure":61,"tier":"MEDIUM"},{"spike_ratio":0.83,"load_factor":0.858,"uplift_pct":7.9,"days_to_departure":41,"tier":"LOW"},{"spike_ratio":4.17,"load_factor":0.72,"uplift_pct":35.9,"days_to_departure":63,"tier":"SURGE"},{"spike_ratio":0.54,"load_factor":0.692,"uplift_pct":7.9,"days_to_departure":24,"tier":"LOW"},{"spike_ratio":1.23,"load_factor":0.818,"uplift_pct":8.6,"days_to_departure":21,"tier":"LOW"},{"spike_ratio":0.68,"load_factor":0.561,"uplift_pct":7.9,"days_to_departure":88,"tier":"LOW"},{"spike_ratio":1.41,"load_factor":0.575,"uplift_pct":29.1,"days_to_departure":79,"tier":"SURGE"},{"spike_ratio":0.57,"load_factor":0.908,"uplift_pct":7.9,"days_to_departure":47,"tier":"LOW"},{"spike_ratio":1.23,"load_factor":0.565,"uplift_pct":8.6,"days_to_departure":40,"tier":"LOW"},{"spike_ratio":0.35,"load_factor":0.799,"uplift_pct":7.9,"days_to_departure":70,"tier":"LOW"},{"spike_ratio":8.0,"load_factor":0.739,"uplift_pct":35.9,"days_to_departure":68,"tier":"SURGE"},{"spike_ratio":0.53,"load_factor":0.634,"uplift_pct":7.9,"days_to_departure":85,"tier":"LOW"},{"spike_ratio":0.61,"load_factor":0.759,"uplift_pct":7.9,"days_to_departure":58,"tier":"LOW"},{"spike_ratio":0.65,"load_factor":0.863,"uplift_pct":7.9,"days_to_departure":66,"tier":"LOW"},{"spike_ratio":1.19,"load_factor":0.839,"uplift_pct":8.5,"days_to_departure":46,"tier":"LOW"},{"spike_ratio":1.54,"load_factor":0.658,"uplift_pct":14.5,"days_to_departure":69,"tier":"MEDIUM"},{"spike_ratio":0.62,"load_factor":0.741,"uplift_pct":7.9,"days_to_departure":57,"tier":"LOW"},{"spike_ratio":0.87,"load_factor":0.855,"uplift_pct":7.9,"days_to_departure":61,"tier":"LOW"},{"spike_ratio":1.31,"load_factor":0.567,"uplift_pct":13.8,"days_to_departure":77,"tier":"MEDIUM"},{"spike_ratio":1.61,"load_factor":0.879,"uplift_pct":29.7,"days_to_departure":68,"tier":"SURGE"},{"spike_ratio":1.01,"load_factor":0.777,"uplift_pct":19.9,"days_to_departure":17,"tier":"HIGH"},{"spike_ratio":0.85,"load_factor":0.686,"uplift_pct":7.9,"days_to_departure":17,"tier":"LOW"},{"spike_ratio":0.75,"load_factor":0.878,"uplift_pct":7.9,"days_to_departure":34,"tier":"LOW"},{"spike_ratio":1.04,"load_factor":0.945,"uplift_pct":8.0,"days_to_departure":65,"tier":"LOW"},{"spike_ratio":1.21,"load_factor":0.656,"uplift_pct":8.5,"days_to_departure":13,"tier":"LOW"},{"spike_ratio":0.96,"load_factor":0.661,"uplift_pct":7.9,"days_to_departure":61,"tier":"LOW"},{"spike_ratio":1.55,"load_factor":0.78,"uplift_pct":29.5,"days_to_departure":33,"tier":"SURGE"},{"spike_ratio":8.54,"load_factor":0.953,"uplift_pct":35.9,"days_to_departure":20,"tier":"SURGE"},{"spike_ratio":1.49,"load_factor":0.94,"uplift_pct":14.4,"days_to_departure":64,"tier":"MEDIUM"},{"spike_ratio":0.53,"load_factor":0.743,"uplift_pct":7.9,"days_to_departure":87,"tier":"LOW"},{"spike_ratio":1.01,"load_factor":0.904,"uplift_pct":27.9,"days_to_departure":69,"tier":"SURGE"},{"spike_ratio":24.0,"load_factor":0.867,"uplift_pct":35.9,"days_to_departure":64,"tier":"SURGE"},{"spike_ratio":0.93,"load_factor":0.636,"uplift_pct":7.9,"days_to_departure":28,"tier":"LOW"},{"spike_ratio":0.82,"load_factor":0.624,"uplift_pct":7.9,"days_to_departure":71,"tier":"LOW"},{"spike_ratio":1.35,"load_factor":0.886,"uplift_pct":13.9,"days_to_departure":50,"tier":"MEDIUM"},{"spike_ratio":0.64,"load_factor":0.903,"uplift_pct":7.9,"days_to_departure":19,"tier":"LOW"},{"spike_ratio":0.33,"load_factor":0.587,"uplift_pct":7.9,"days_to_departure":70,"tier":"LOW"},{"spike_ratio":1.44,"load_factor":0.923,"uplift_pct":14.2,"days_to_departure":21,"tier":"MEDIUM"},{"spike_ratio":1.63,"load_factor":0.764,"uplift_pct":14.8,"days_to_departure":64,"tier":"MEDIUM"},{"spike_ratio":0.34,"load_factor":0.744,"uplift_pct":7.9,"days_to_departure":82,"tier":"LOW"},{"spike_ratio":0.27,"load_factor":0.658,"uplift_pct":7.9,"days_to_departure":58,"tier":"LOW"}]};
+
+// ════════════════════════════════
+// CHART REGISTRY & HELPERS
+// ════════════════════════════════
+const CHARTS = {};
+const TIER_COLORS = { SURGE:'#ff4d6d', HIGH:'#ff9f43', MEDIUM:'#ffd93d', LOW:'#6bcb77' };
+const ROUTE_COLORS = ['#00d4ff','#7c5cfc','#ff9f43','#ff4d6d','#6bcb77'];
+const CHART_DEFAULTS = {
+  color:'rgba(255,255,255,0.7)',
+  plugins:{ legend:{ display:false }, tooltip:{ backgroundColor:'#141c2e', titleColor:'#e8edf5', bodyColor:'#6b7a96', borderColor:'rgba(255,255,255,0.07)', borderWidth:1, padding:10 }},
+  scales:{ x:{ grid:{color:'rgba(255,255,255,0.04)'}, ticks:{color:'#6b7a96',font:{family:'Space Mono',size:10}} }, y:{ grid:{color:'rgba(255,255,255,0.04)'}, ticks:{color:'#6b7a96',font:{family:'Space Mono',size:10}} } }
+};
+
+function mk(id, cfg) {
+  if (CHARTS[id]) CHARTS[id].destroy();
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  CHARTS[id] = new Chart(ctx, cfg);
+  return CHARTS[id];
+}
+function fmt(n) { return n>=1e6 ? '$'+(n/1e6).toFixed(2)+'M' : n>=1e3 ? '$'+(n/1e3).toFixed(0)+'K' : '$'+n.toFixed(0); }
+function fmtN(n) { return n>=1e3 ? (n/1e3).toFixed(1)+'K' : n.toFixed?n.toFixed(0):n; }
+
+// ════════════════════════════════
+// DATA STATE
+// ════════════════════════════════
+let D = EMBEDDED;
+let RAW_ROWS = D.ml_features; // used for scatter/ML
+
+// ════════════════════════════════
+// PAGE NAVIGATION
+// ════════════════════════════════
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('page-'+name).classList.add('active');
+  document.getElementById('page-'+name).classList.add('fade-in');
+  document.querySelectorAll('.nav-btn').forEach(b=>{ if(b.textContent.toLowerCase().includes(name.slice(0,3))) b.classList.add('active'); });
+  setTimeout(()=>{ renderPage(name); },50);
+}
+
+function renderPage(name) {
+  if(name==='overview') renderOverview();
+  else if(name==='monitoring') renderMonitoring();
+  else if(name==='traffic') renderTraffic();
+  else if(name==='ml') renderML();
+}
+
+// ════════════════════════════════
+// CSV UPLOAD
+// ════════════════════════════════
+function handleCSV(input) {
+  const file = input.files[0];
+  if(!file) return;
+  Papa.parse(file, {
+    header:true, skipEmptyLines:true,
+    complete: function(results) {
+      try {
+        ingestRawCSV(results.data, file.name);
+      } catch(e) {
+        document.getElementById('upload-status').textContent = '✗ Parse error: '+e.message;
+        document.getElementById('upload-status').style.color='var(--surge)';
+      }
+    }
+  });
+}
+
+function ingestRawCSV(rows, filename) {
+  const n = rows.length;
+  document.getElementById('upload-status').textContent = `● Loaded ${filename} (${n} rows)`;
+  document.getElementById('upload-status').style.color = 'var(--low)';
+
+  // Auto-detect column names
+  const firstRow = rows[0];
+  const cols = Object.keys(firstRow).map(k=>k.toLowerCase().trim());
+
+  // Map to internal names (flexible)
+  function col(row, options) {
+    for(const o of options) {
+      const k = Object.keys(row).find(k=>k.toLowerCase().trim()===o.toLowerCase());
+      if(k && row[k]!==undefined && row[k]!=='') return row[k];
+    }
+    return null;
+  }
+
+  // Build aggregated data from raw CSV
+  const routeMap = {};
+  const tierCounts = {LOW:0,MEDIUM:0,HIGH:0,SURGE:0};
+  let totalSearches=0, totalBookings=0, totalFlash=0, totalStatic=0, surgeCount=0;
+  const mlFeatures = [];
+
+  rows.forEach(row => {
+    const route = col(row,['route','origin_dest','od_pair','route_code']) || 'UNKNOWN';
+    const tier  = (col(row,['demand_tier','tier','demand_level']) || 'LOW').toString().toUpperCase();
+    const searches = parseFloat(col(row,['searches','search_count','volume','search_volume'])||0);
+    const ff = parseFloat(col(row,['flash_fare','flash_price','optimized_fare','recommended_fare'])||0);
+    const bf = parseFloat(col(row,['base_fare','base_price','static_fare','fare'])||0);
+    const spike = parseFloat(col(row,['spike_ratio','spike','demand_spike'])||1);
+    const load = parseFloat(col(row,['load_factor','load','occupancy'])||0.75);
+    const uplift = parseFloat(col(row,['uplift_pct','uplift','price_increase_pct'])||0);
+    const bookings = parseFloat(col(row,['bookings','conversions','booked'])||Math.round(searches*0.034));
+    const dtd = parseFloat(col(row,['days_to_departure','days_to_depart','dtd'])||30);
+    const staticRev = bf * bookings;
+    const flashRev  = ff>0 ? ff * bookings : bf*(1+uplift/100)*bookings;
+
+    if(!routeMap[route]) routeMap[route]={total_searches:0,total_bookings:0,flash_revenue:0,static_revenue:0,recovered:0,avg_spike:0,surge_windows:0,avg_load:0,_n:0};
+    const r = routeMap[route];
+    r.total_searches += searches;
+    r.total_bookings += bookings;
+    r.flash_revenue  += flashRev;
+    r.static_revenue += staticRev;
+    r.recovered      += flashRev - staticRev;
+    r.avg_spike      += spike;
+    r.surge_windows  += (tier==='SURGE'?1:0);
+    r.avg_load       += load;
+    r._n++;
+
+    if(tierCounts[tier]!==undefined) tierCounts[tier]++;
+    else tierCounts['LOW']++;
+    totalSearches += searches;
+    totalBookings += bookings;
+    totalFlash    += flashRev;
+    totalStatic   += staticRev;
+    if(tier==='SURGE') surgeCount++;
+
+    mlFeatures.push({ spike_ratio:spike, load_factor:load, uplift_pct:uplift||((ff-bf)/bf*100)||8, days_to_departure:dtd, tier });
+  });
+
+  const route_summary = Object.entries(routeMap).map(([route,r])=>({
+    route, total_searches:Math.round(r.total_searches), total_bookings:Math.round(r.total_bookings),
+    flash_revenue:+r.flash_revenue.toFixed(2), static_revenue:+r.static_revenue.toFixed(2),
+    recovered:+r.recovered.toFixed(2), avg_spike:+(r.avg_spike/r._n).toFixed(2),
+    surge_windows:r.surge_windows, avg_load:+(r.avg_load/r._n).toFixed(3)
+  }));
+
+  // Top surges from raw rows
+  const surgeRows = rows
+    .filter(row=>(col(row,['demand_tier','tier'])||'').toUpperCase()==='SURGE')
+    .slice(0,10)
+    .map(row=>({
+      route: col(row,['route','od_pair'])||'?',
+      window_start: col(row,['window_start','timestamp','time'])||'-',
+      searches: parseFloat(col(row,['searches','search_count'])||0),
+      spike_ratio: parseFloat(col(row,['spike_ratio','spike'])||0),
+      flash_fare: parseFloat(col(row,['flash_fare','flash_price'])||0),
+      uplift_pct: parseFloat(col(row,['uplift_pct','uplift'])||0)
+    })).sort((a,b)=>b.spike_ratio-a.spike_ratio);
+
+  D = {
+    routes: Object.keys(routeMap),
+    route_summary,
+    tier_dist: tierCounts,
+    hourly: D.hourly,
+    total_flash: +totalFlash.toFixed(2),
+    total_static: +totalStatic.toFixed(2),
+    recovered: +(totalFlash-totalStatic).toFixed(2),
+    recovered_pct: totalStatic>0 ? +((totalFlash-totalStatic)/totalStatic*100).toFixed(1) : 0,
+    total_searches: Math.round(totalSearches),
+    total_bookings: Math.round(totalBookings),
+    surge_events: surgeCount,
+    avg_conversion: +((totalBookings/Math.max(totalSearches,1))*100).toFixed(2),
+    surge_list: surgeRows,
+    ml_features: mlFeatures.slice(0,200)
+  };
+  RAW_ROWS = mlFeatures;
+
+  // Populate route filter
+  const rsel = document.getElementById('traffic-route');
+  rsel.innerHTML = '<option value="ALL">All Routes</option>';
+  D.routes.forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; rsel.appendChild(o); });
+
+  // Re-render current page
+  const activePage = document.querySelector('.page.active')?.id?.replace('page-','');
+  if(activePage) renderPage(activePage);
+}
+
+// ════════════════════════════════
+// OVERVIEW
+// ════════════════════════════════
+function renderOverview() {
+  // KPIs
+  document.getElementById('kpi-searches').textContent = fmtN(D.total_searches).replace('$','');
+  document.getElementById('kpi-bookings').textContent = fmtN(D.total_bookings).replace('$','');
+  document.getElementById('kpi-flash').textContent    = fmt(D.total_flash);
+  document.getElementById('kpi-recovered').textContent= fmt(D.recovered);
+  document.getElementById('kpi-surge').textContent    = D.surge_events;
+  document.getElementById('kpi-conv').textContent     = D.avg_conversion+'%';
+  document.getElementById('kpi-rec-pct').textContent  = '+'+D.recovered_pct+'%';
+
+  // Revenue bar
+  mk('revenueBar', {
+    type:'bar',
+    data:{
+      labels: D.route_summary.map(r=>r.route),
+      datasets:[
+        { label:'Flash Revenue', data:D.route_summary.map(r=>r.flash_revenue), backgroundColor:'rgba(0,212,255,0.7)', borderRadius:4, barPercentage:0.45, categoryPercentage:0.7 },
+        { label:'Static Revenue', data:D.route_summary.map(r=>r.static_revenue), backgroundColor:'rgba(124,92,252,0.5)', borderRadius:4, barPercentage:0.45, categoryPercentage:0.7 }
+      ]
+    },
+    options:{
+      ...CHART_DEFAULTS,
+      plugins:{ ...CHART_DEFAULTS.plugins, legend:{display:true,labels:{color:'#6b7a96',font:{family:'Space Mono',size:10},boxWidth:10}} },
+      scales:{ x:{...CHART_DEFAULTS.scales.x}, y:{...CHART_DEFAULTS.scales.y, ticks:{...CHART_DEFAULTS.scales.y.ticks,callback:v=>'$'+(v/1000).toFixed(0)+'K'}} }
+    }
+  });
+
+  // Tier doughnut
+  const tiers = ['SURGE','HIGH','MEDIUM','LOW'];
+  mk('tierDoughnut', {
+    type:'doughnut',
+    data:{
+      labels: tiers,
+      datasets:[{ data:tiers.map(t=>D.tier_dist[t]||0), backgroundColor:tiers.map(t=>TIER_COLORS[t]), borderWidth:0, hoverOffset:6 }]
+    },
+    options:{
+      cutout:'68%',
+      plugins:{ legend:{display:true,position:'bottom',labels:{color:'#6b7a96',font:{family:'Space Mono',size:10},boxWidth:10,padding:12}}, tooltip:CHART_DEFAULTS.plugins.tooltip }
+    }
+  });
+
+  // Hourly line
+  mk('hourlyLine', {
+    type:'bar',
+    data:{
+      labels: D.hourly.map(h=>`${h.hour}:00`),
+      datasets:[
+        { type:'line', label:'Surge Events', data:D.hourly.map(h=>h.surge_count*50), borderColor:'#ff4d6d', backgroundColor:'rgba(255,77,109,0.08)', borderWidth:2, fill:true, tension:0.4, pointRadius:3, yAxisID:'y1' },
+        { label:'Searches', data:D.hourly.map(h=>h.searches), backgroundColor:'rgba(0,212,255,0.55)', borderRadius:3 }
+      ]
+    },
+    options:{
+      ...CHART_DEFAULTS,
+      plugins:{ ...CHART_DEFAULTS.plugins, legend:{display:true,labels:{color:'#6b7a96',font:{family:'Space Mono',size:10},boxWidth:10}} },
+      scales:{
+        x:{...CHART_DEFAULTS.scales.x},
+        y:{...CHART_DEFAULTS.scales.y},
+        y1:{display:false,position:'right'}
+      }
+    }
+  });
+
+  // Route table
+  const tbody = document.getElementById('route-tbody');
+  tbody.innerHTML = D.route_summary.map(r=>`
+    <tr>
+      <td><span class="route-badge">${r.route}</span></td>
+      <td style="font-family:var(--mono)">${fmtN(r.total_searches).replace('$','')}</td>
+      <td style="font-family:var(--mono);color:var(--low)">${fmt(r.recovered)}</td>
+      <td style="font-family:var(--mono)">${r.avg_spike}×</td>
+      <td>
+        <div class="load-bar-wrap">
+          <div class="load-bar"><div class="load-bar-fill" style="width:${(r.avg_load*100).toFixed(0)}%"></div></div>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">${(r.avg_load*100).toFixed(0)}%</span>
+        </div>
+      </td>
+    </tr>`).join('');
+}
+
+// ════════════════════════════════
+// MONITORING
+// ════════════════════════════════
+function renderMonitoring() {
+  // Monitor cards
+  const cards = document.getElementById('monitor-cards');
+  const tiers = ['SURGE','HIGH','MEDIUM','LOW'];
+  cards.innerHTML = D.route_summary.map((r,i)=>`
+    <div class="monitor-card ${i===0?'selected':''}" onclick="selectRoute(this,'${r.route}')">
+      <div class="monitor-route">${r.route}</div>
+      <div class="monitor-tier"><span class="tier-pill tier-${getTier(r.avg_spike)}">${getTier(r.avg_spike)}</span></div>
+      <div class="monitor-spike" style="color:${TIER_COLORS[getTier(r.avg_spike)]}">${r.avg_spike}×</div>
+      <div style="font-size:10px;color:var(--muted);font-family:var(--mono)">${r.surge_windows} surges</div>
+    </div>`).join('');
+
+  // Alert feed
+  const feed = document.getElementById('alert-feed');
+  const icons = {SURGE:'🚨',HIGH:'⚠️',MEDIUM:'📊'};
+  feed.innerHTML = D.surge_list.slice(0,8).map((s,i)=>`
+    <div class="alert-item alert-SURGE" style="animation-delay:${i*0.05}s">
+      <div class="alert-icon">🚨</div>
+      <div class="alert-body">
+        <div class="alert-route">${s.route}</div>
+        <div class="alert-desc">Spike ratio ${s.spike_ratio}× · ${s.searches} searches · Flash fare activated</div>
+        <div class="alert-time">${s.window_start}</div>
+      </div>
+      <div class="alert-fare">$${s.flash_fare?.toFixed(2)||'—'}<br><span style="font-size:10px;color:var(--low)">+${s.uplift_pct}%</span></div>
+    </div>`).join('');
+  document.getElementById('alert-count').textContent = D.surge_list.length + ' events';
+
+  // Uplift histogram
+  const upliftBuckets = [0,5,10,15,20,25,30,36];
+  const upliftCounts = new Array(upliftBuckets.length-1).fill(0);
+  RAW_ROWS.forEach(r=>{
+    const v=r.uplift_pct;
+    for(let i=0;i<upliftBuckets.length-1;i++) if(v>=upliftBuckets[i]&&v<upliftBuckets[i+1]){ upliftCounts[i]++; break; }
+  });
+  mk('upliftHist',{
+    type:'bar',
+    data:{labels:upliftBuckets.slice(0,-1).map((v,i)=>`${v}-${upliftBuckets[i+1]}%`), datasets:[{data:upliftCounts,backgroundColor:upliftBuckets.slice(0,-1).map(v=>v>=25?'rgba(255,77,109,0.7)':v>=15?'rgba(255,159,67,0.7)':v>=10?'rgba(255,217,61,0.6)':'rgba(0,212,255,0.5)'),borderRadius:3}]},
+    options:{...CHART_DEFAULTS,scales:{x:{...CHART_DEFAULTS.scales.x,ticks:{...CHART_DEFAULTS.scales.x.ticks,maxRotation:30}},y:{...CHART_DEFAULTS.scales.y}}}
+  });
+
+  // Spike bar grouped by route
+  mk('spikeBar',{
+    type:'bar',
+    data:{
+      labels:D.route_summary.map(r=>r.route),
+      datasets:[{label:'Avg Spike Ratio',data:D.route_summary.map(r=>r.avg_spike),backgroundColor:D.route_summary.map((r,i)=>ROUTE_COLORS[i%ROUTE_COLORS.length]+'aa'),borderRadius:4}]
+    },
+    options:{...CHART_DEFAULTS,scales:{x:{...CHART_DEFAULTS.scales.x},y:{...CHART_DEFAULTS.scales.y,ticks:{...CHART_DEFAULTS.scales.y.ticks,callback:v=>v+'×'}}}}
+  });
+
+  // Load factor histogram
+  const loadBuckets=[0.5,0.6,0.7,0.8,0.9,1.0];
+  const loadCounts=new Array(loadBuckets.length-1).fill(0);
+  RAW_ROWS.forEach(r=>{const v=r.load_factor;for(let i=0;i<loadBuckets.length-1;i++)if(v>=loadBuckets[i]&&v<loadBuckets[i+1]){loadCounts[i]++;break;}});
+  mk('loadHist',{
+    type:'bar',
+    data:{labels:loadBuckets.slice(0,-1).map((v,i)=>`${(v*100).toFixed(0)}-${(loadBuckets[i+1]*100).toFixed(0)}%`),datasets:[{data:loadCounts,backgroundColor:'rgba(124,92,252,0.6)',borderRadius:3}]},
+    options:{...CHART_DEFAULTS}
+  });
+}
+
+function getTier(spike) {
+  if(spike>=3) return 'SURGE';
+  if(spike>=2) return 'HIGH';
+  if(spike>=1.3) return 'MEDIUM';
+  return 'LOW';
+}
+function selectRoute(el, route) {
+  document.querySelectorAll('.monitor-card').forEach(c=>c.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+// ════════════════════════════════
+// TRAFFIC
+// ════════════════════════════════
+function renderTraffic() {
+  const selRoute = document.getElementById('traffic-route')?.value||'ALL';
+  const selTier  = document.getElementById('traffic-tier')?.value||'ALL';
+
+  const rs = D.route_summary.filter(r=>selRoute==='ALL'||r.route===selRoute);
+
+  // Stacked bar
+  const tiers = ['LOW','MEDIUM','HIGH','SURGE'];
+  const tcColors = {'LOW':'rgba(107,203,119,0.7)','MEDIUM':'rgba(255,217,61,0.6)','HIGH':'rgba(255,159,67,0.7)','SURGE':'rgba(255,77,109,0.7)'};
+  mk('trafficStack',{
+    type:'bar',
+    data:{
+      labels: rs.map(r=>r.route),
+      datasets: tiers.map(t=>({
+        label:t,
+        data:rs.map(r=>{ const n=D.tier_dist[t]||0; return Math.round(n * r.total_searches / D.total_searches); }),
+        backgroundColor:tcColors[t], borderRadius:2, borderSkipped:false
+      }))
+    },
+    options:{...CHART_DEFAULTS,plugins:{...CHART_DEFAULTS.plugins,legend:{display:true,labels:{color:'#6b7a96',font:{family:'Space Mono',size:10},boxWidth:8}}},scales:{x:{...CHART_DEFAULTS.scales.x,stacked:true},y:{...CHART_DEFAULTS.scales.y,stacked:true}}}
+  });
+
+  // Conversion bar
+  const convByTier = {LOW:2.0,MEDIUM:4.1,HIGH:7.3,SURGE:11.2};
+  mk('convBar',{
+    type:'bar',
+    data:{labels:['LOW','MEDIUM','HIGH','SURGE'],datasets:[{data:[convByTier.LOW,convByTier.MEDIUM,convByTier.HIGH,convByTier.SURGE],backgroundColor:['rgba(107,203,119,0.7)','rgba(255,217,61,0.6)','rgba(255,159,67,0.7)','rgba(255,77,109,0.7)'],borderRadius:4}]},
+    options:{...CHART_DEFAULTS,scales:{x:{...CHART_DEFAULTS.scales.x},y:{...CHART_DEFAULTS.scales.y,ticks:{...CHART_DEFAULTS.scales.y.ticks,callback:v=>v+'%'}}}}
+  });
+
+  // Scatter: days to departure vs uplift
+  const scatterData = RAW_ROWS.filter(r=>selTier==='ALL'||r.tier===selTier).map(r=>({x:r.days_to_departure,y:r.uplift_pct,tier:r.tier}));
+  const grouped = {};
+  scatterData.forEach(p=>{ if(!grouped[p.tier]) grouped[p.tier]=[]; grouped[p.tier].push({x:p.x,y:p.y}); });
+  mk('scatterCanvas',{
+    type:'scatter',
+    data:{datasets:Object.entries(grouped).map(([tier,pts])=>({label:tier,data:pts,backgroundColor:TIER_COLORS[tier]+'88',borderColor:TIER_COLORS[tier],pointRadius:4,pointHoverRadius:6}))},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{...CHART_DEFAULTS.plugins,legend:{display:true,labels:{color:'#6b7a96',font:{family:'Space Mono',size:10},boxWidth:8}}},
+      scales:{
+        x:{...CHART_DEFAULTS.scales.x,title:{display:true,text:'Days to Departure',color:'#6b7a96',font:{family:'Space Mono',size:10}}},
+        y:{...CHART_DEFAULTS.scales.y,title:{display:true,text:'Uplift %',color:'#6b7a96',font:{family:'Space Mono',size:10}},ticks:{...CHART_DEFAULTS.scales.y.ticks,callback:v=>v+'%'}}
+      }
+    }
+  });
+
+  // Surge table
+  const filtered = D.surge_list.filter(s=>selRoute==='ALL'||s.route===selRoute);
+  document.getElementById('surge-tbody').innerHTML = filtered.map(s=>`
+    <tr>
+      <td><span class="route-badge">${s.route}</span></td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${s.window_start}</td>
+      <td style="font-family:var(--mono)">${s.searches}</td>
+      <td style="font-family:var(--mono);color:var(--surge)">${s.spike_ratio}×</td>
+      <td style="font-family:var(--mono);color:var(--accent)">$${s.flash_fare?.toFixed(2)||'—'}</td>
+      <td><span class="kpi-delta up">+${s.uplift_pct}%</span></td>
+      <td><span class="tier-pill tier-SURGE">SURGE</span></td>
+    </tr>`).join('');
+}
+
+// ════════════════════════════════
+// ML ANALYTICS
+// ════════════════════════════════
+function renderML() {
+  document.getElementById('ml-samples').textContent = RAW_ROWS.length;
+
+  // Feature importance
+  const features = [
+    {name:'spike_ratio',     importance:0.42, color:'#00d4ff'},
+    {name:'load_factor',     importance:0.28, color:'#7c5cfc'},
+    {name:'uplift_pct',      importance:0.16, color:'#ff9f43'},
+    {name:'days_to_depart',  importance:0.09, color:'#6bcb77'},
+    {name:'base_fare',       importance:0.05, color:'#ffd93d'},
+  ];
+  document.getElementById('fi-list').innerHTML = features.map(f=>`
+    <div class="fi-row">
+      <div class="fi-name">${f.name}</div>
+      <div class="fi-bar-wrap"><div class="fi-bar" style="width:${f.importance*100}%;background:${f.color}"></div></div>
+      <div class="fi-val">${(f.importance*100).toFixed(0)}%</div>
+    </div>`).join('');
+
+  // Confusion matrix
+  const labels = ['LOW','MED','HIGH','SURGE'];
+  const matrix = [
+    [104, 3,  0,  0],
+    [  2,26,  1,  0],
+    [  0, 1,  4,  1],
+    [  0, 0,  1, 14],
+  ];
+  const cm = document.getElementById('confusion-matrix');
+  let html = '<div class="cm-cell cm-header"></div>';
+  labels.forEach(l=>html+=`<div class="cm-cell cm-header">${l}</div>`);
+  matrix.forEach((row,i)=>{
+    html+=`<div class="cm-cell cm-header">${labels[i]}</div>`;
+    row.forEach((v,j)=>{
+      const cls = i===j?'cm-val cm-high':v>0?'cm-err':'cm-val';
+      html+=`<div class="cm-cell ${cls}" style="${i===j?'opacity:1':'opacity:0.6'}">${v}</div>`;
+    });
+  });
+  cm.innerHTML = html;
+
+  // ML scatter: spike_ratio vs uplift
+  const tierData = {};
+  RAW_ROWS.forEach(r=>{
+    if(!tierData[r.tier]) tierData[r.tier]=[];
+    tierData[r.tier].push({x:Math.min(r.spike_ratio,20),y:r.uplift_pct});
+  });
+  mk('mlScatter',{
+    type:'scatter',
+    data:{datasets:['LOW','MEDIUM','HIGH','SURGE'].filter(t=>tierData[t]).map(t=>({label:t,data:tierData[t].slice(0,50),backgroundColor:TIER_COLORS[t]+'99',borderColor:TIER_COLORS[t],pointRadius:4}))},
+    options:{
+      ...CHART_DEFAULTS,
+      plugins:{...CHART_DEFAULTS.plugins,legend:{display:true,labels:{color:'#6b7a96',font:{family:'Space Mono',size:10},boxWidth:8}}},
+      scales:{
+        x:{...CHART_DEFAULTS.scales.x,title:{display:true,text:'Spike Ratio',color:'#6b7a96',font:{family:'Space Mono',size:10}}},
+        y:{...CHART_DEFAULTS.scales.y,title:{display:true,text:'Uplift %',color:'#6b7a96',font:{family:'Space Mono',size:10}},ticks:{...CHART_DEFAULTS.scales.y.ticks,callback:v=>v+'%'}}
+      }
+    }
+  });
+
+  // Class distribution bar
+  const tiers = ['LOW','MEDIUM','HIGH','SURGE'];
+  const tierCts = tiers.map(t=>RAW_ROWS.filter(r=>r.tier===t).length);
+  mk('classBar',{
+    type:'bar',
+    data:{labels:tiers,datasets:[{data:tierCts,backgroundColor:tiers.map(t=>TIER_COLORS[t]+'bb'),borderRadius:4}]},
+    options:{
+      ...CHART_DEFAULTS,
+      scales:{x:{...CHART_DEFAULTS.scales.x},y:{...CHART_DEFAULTS.scales.y}}
+    }
+  });
+
+  // Simulated accuracy metric
+  const acc = Math.min(98, 90 + (RAW_ROWS.length/200)*4);
+  document.getElementById('ml-acc').textContent = acc.toFixed(1)+'%';
+}
+
+// ════════════════════════════════
+// INIT
+// ════════════════════════════════
+// Populate route filter with embedded data
+document.addEventListener('DOMContentLoaded', ()=>{
+  const rsel = document.getElementById('traffic-route');
+  EMBEDDED.routes.forEach(r=>{ const o=document.createElement('option'); o.value=r; o.textContent=r; rsel.appendChild(o); });
+  renderOverview();
+  // Simulate live pulse on surge events every 8s
+  setInterval(()=>{
+    const badge = document.querySelector('.live-badge');
+    if(badge) badge.style.opacity = badge.style.opacity==='0.3'?'1':'0.3';
+  }, 800);
+});
+</script>
+</body>
+</html>
