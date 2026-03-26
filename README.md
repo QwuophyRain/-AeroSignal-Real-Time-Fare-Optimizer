@@ -275,3 +275,16 @@ SURGE_SPIKE_THRESHOLD=3.0
 
 Requires **Python 3.10+** (uses `match` syntax and modern type hints).
 Tested on Python 3.11 and 3.13.
+
+## 📸 Screenshots
+<img width="1674" height="1011" alt="Screenshot 2026-03-26 at 1 18 17 PM" src="https://github.com/user-attachments/assets/308bd9ac-cab7-4e04-ac62-1e5f9db24b1c" />
+<img width="1680" height="1014" alt="Screenshot 2026-03-26 at 1 18 01 PM" src="https://github.com/user-attachments/assets/60a4d14b-f1c6-4a23-9713-28d8a3772932" />
+<img width="1680" height="1014" alt="Screenshot 2026-03-26 at 1 17 48 PM" src="https://github.com/user-attachments/assets/31fda7f7-d3c2-4805-b5af-4341bb1ff223" />
+<img width="1670" height="953" alt="Screenshot 2026-03-26 at 1 17 29 PM" src="https://github.com/user-attachments/assets/bbd746c0-cdc0-4ac4-ba7d-c8a89cf03a0b" />
+<img width="1680" height="1050" alt="Screenshot 2026-03-26 at 1 16 55 PM" src="https://github.com/user-attachments/assets/0a776027-1012-4a31-b912-347d6d6e7ef3" />
+<img width="1680" height="1050" alt="Screenshot 2026-03-26 at 1 16 43 PM" src="https://github.com/user-attachments/assets/d28771f0-19ee-413d-aea7-1acf45264c94" />
+<img width="1673" height="1010" alt="Screenshot 2026-03-26 at 1 15 58 PM" src="https://github.com/user-attachments/assets/6f5a6e1b-a38f-45a0-8c2d-32d308a008c6" />
+<img width="1678" height="1006" alt="Screenshot 2026-03-26 at 1 14 12 PM" src="https://github.com/user-attachments/assets/a4ffad90-4480-4842-a1c3-e2affe7d10f1" />
+<img width="1678" height="1014" alt="Screenshot 2026-03-26 at 1 13 57 PM" src="https://github.com/user-attachments/assets/dfd87c80-28dd-46a8-a5b7-66affbebb9a6" />
+<img width="1678" height="1008" alt="Screenshot 2026-03-26 at 1 13 21 PM" src="https://github.com/user-attachments/assets/08e097f0-7c58-4ab7-9def-a4f0624060ed" />
+
